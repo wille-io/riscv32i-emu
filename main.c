@@ -64,11 +64,37 @@ uint32_t mem_read_32(uint32_t addr)
 
 void mem_write_8(uint32_t addr, uint8_t val)
 {
-  mem_index[mem_ptr] = addr;
-  mem_block[mem_ptr] = val;
-  mem_ptr++;
+  if (mem_ptr >= MAX_MEM_BLOCKS)
+  {
+    fprintf(stderr, "starved of mem blocks!\n");
+    abort();
+  }
+
+  if (addr == 9666)
+    puts("YAY !!!!!!!!! 9666 !!!!!!!!!");
+
+  // look for existing mem_block for addr
+  uint8_t found = 0;
+  for (uint16_t i = 0; i < mem_ptr; i++)
+  {
+    if (mem_index[i] == addr)
+    {
+      mem_block[i] = val;
+      found = 1;
+      break;
+    }
+  }
+
+  if (!found)
+  {
+    mem_index[mem_ptr] = addr;
+    mem_block[mem_ptr] = val;
+    mem_ptr++;
+  }
+
   if (silent)
     return;
+
   printf("mem_write_8: wrote val %"PRIu8" to addr 0x%"PRIx32"\n", val, addr);
 }
 
@@ -94,6 +120,15 @@ void mem_write_32(uint32_t addr, uint32_t val)
 //   for (int i = 0; i < size; i++)
 //     ((char *)adr)[i] = 0;
 // }
+
+
+const char *_r2s[] = { "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1" };
+
+
+const char *r2s(uint8_t reg)
+{
+  return _r2s[reg];
+}
 
 
 int main()
@@ -129,7 +164,7 @@ int main()
 
   //printf("mem_ptr now %"PRIu32"\n", mem_ptr);
 
-
+  
   // go :) - NOTE: must be platform independent at this point:
   cpu.pc = 0;
   cpu.regs[2] = 0x10000; // set stack pointer to some smaller value than 0-1 ;)
@@ -187,7 +222,7 @@ int main()
           {
             switch (funct3)
             {
-              case 0b000: // ADDI
+              case 0b000: // ADDI (LI)
               {
                 // add the values of reg rs1 + imm to reg rd  
 
@@ -200,7 +235,7 @@ int main()
                 uint32_t old = cpu.regs[rd];
                 cpu.regs[rd] = cpu.regs[rs1] + imm;
 
-                printf("OP: ADDI: _imm = %"PRIu32", imm = %"PRIi32", rd = %"PRIu8", rs1 = %"PRIu8", x[rd](result) = %"PRIu32", x[rd](old) = %"PRIu32", x[rs1] = %"PRIu32"\n", _imm, imm, rd, rs1, cpu.regs[rd], old, cpu.regs[rs1]);
+                printf("OP: ADDI: _imm = %"PRIu32", imm = %"PRIi32", rd = %s, rs1 = %s, x[rd](result) = %"PRIu32", x[rd](old) = %"PRIu32", x[rs1] = %"PRIu32"\n", _imm, imm, r2s(rd), r2s(rs1), cpu.regs[rd], old, cpu.regs[rs1]);
                 break;
               }
 
@@ -219,8 +254,8 @@ int main()
           {
             switch (funct3)
             {
-              case 0b000: // SB
-              case 0b010: // SW
+              case 0b000: // SB (n = 8-bit)
+              case 0b010: // SW (n = 32-bit)
               {
                 // write n-bit value from reg rs2 into memory at reg rs1 + signed offset
                 uint8_t rs1 = (inst >> 15) & 0b11111;
@@ -229,14 +264,14 @@ int main()
                 uint32_t _offset = ((inst >> 7) & 0b11111) | (((inst >> 25) & 0b1111111) << 5); 
                 int32_t offset = (((int32_t)_offset) << (32 -12)) >> (32 - 12); // sign-extend to 12 bit integer
                 
-                uint32_t addr = cpu.regs[rs1] + offset;
+                uint32_t addr = ((int32_t)cpu.regs[rs1]) + offset;
 
                 if (funct3 == 0b000) // SB
                   mem_write_8(addr, cpu.regs[rs2]);
-                else
+                else // SW
                   mem_write_32(addr, cpu.regs[rs2]);
 
-                printf("OP: SW/SB: offset = %"PRIi32", _offset = %"PRIu32", rs1 = %"PRIu8", rs2 = %"PRIu8", reg[rs1] = %"PRIu32", reg[rs2] = %"PRIu32", addr = %"PRIu32"\n", offset, _offset, rs1, rs2, cpu.regs[rs1],cpu.regs[rs2], addr);
+                printf("OP: SW/SB: offset = %"PRIi32", _offset = %"PRIu32", rs1 = %s, rs2 = %s, reg[rs1] = %"PRIu32", reg[rs2] = %"PRIu32", addr = %"PRIx32"\n", offset, _offset, r2s(rs1), r2s(rs2), cpu.regs[rs1],cpu.regs[rs2], addr);
 
                 break;
               }
@@ -254,7 +289,7 @@ int main()
 
               //   mem_write_32(addr, cpu.regs[rs2]);
 
-              //   printf("OP: SW: offset = %"PRIi32", _offset = %"PRIu32", rs1 = %"PRIu8", rs2 = %"PRIu8", reg[rs1] = %"PRIu32", reg[rs2] = %"PRIu32", addr = %"PRIu32"\n", offset, _offset, rs1, rs2, cpu.regs[rs1],cpu.regs[rs2], addr);
+              //   printf("OP: SW: offset = %"PRIi32", _offset = %"PRIu32", rs1 = %"PRIu8", rs2 = %"PRIu8", reg[rs1] = %"PRIu32", reg[rs2] = %"PRIu32", addr = %"PRIu32"\n", offset, _offset, r2s(rs1), r2s(rs2), cpu.regs[rs1],cpu.regs[rs2], addr);
 
               //   break;
               // }
@@ -274,12 +309,12 @@ int main()
           {
             // put 12 bit sign extended imm into reg rd
 
-            uint8_t rd = (inst >> 7) & 0b11111;      
-            uint32_t _imm = (inst >> 12) & 0b11111111111111111111;
+            uint8_t rd = (inst >> 7) & 0b11111;
+            uint32_t _imm = (inst & 0b11111111111111111111000000000000);
             int32_t imm = (((int32_t)_imm) << 0) >> 0;
 
             cpu.regs[rd] = imm;
-            printf("OP: LUI: rd = %"PRIu8", imm = %"PRIi32", _imm = %"PRIu32"\n", rd, imm, _imm);
+            printf("OP: LUI: rd = %s, imm = %"PRIi32", _imm = %"PRIu32"\n", r2s(rd), imm, _imm);
             break;
           }
 
@@ -298,12 +333,12 @@ int main()
                 uint32_t _offset = (inst >> 20) & 0b111111111111;
                 int32_t offset = (((int32_t)_offset) << (32 - 12)) >> (32 - 12); // s-e 2 12
 
-                uint32_t addr = cpu.regs[rs1];
+                uint32_t addr = (((int32_t)cpu.regs[rs1]) + offset);
                 uint32_t _val = mem_read_32(addr);
-                int32_t val = ((((int32_t)_val) << 0) >> 0) + offset; // s-e 2 0
+                int32_t val = ((((int32_t)_val) << 0) >> 0); // s-e 2 0
 
                 cpu.regs[rd] = val;
-                printf("OP: LW: rd = %"PRIu8", rs1 = %"PRIu8", addr = %"PRIu32", _offset = %"PRIu32", offset = %"PRIi32", _val = %"PRIu32", val = %"PRIi32"\n", rd, rs1, addr, _offset, offset, _val, val);
+                printf("OP: LW: rd = %s, rs1 = %s, reg[rs1] = %"PRIu32", addr = %"PRIx32", _offset = %"PRIu32", offset = %"PRIi32", _val = %"PRIu32", val = %"PRIi32" (unsigned = %"PRIu32")\n", r2s(rd), r2s(rs1), cpu.regs[rs1], addr, _offset, offset, _val, val, val);
                 break;
               }
 
@@ -338,12 +373,12 @@ int main()
                   cpu.regs[rd] = next_address;
                 }
 
-                cpu.pc = ((cpu.regs[rs1] + offset) & ~(uint32_t)1) - 4; // 0b01111111111111111111111111111110; // ?????????????
+                cpu.pc = ((cpu.regs[rs1] + offset) & ~(uint32_t)1);
 
-                printf("OP: JALR (RET): rd = %"PRIu8", rs1 = %"PRIu8", reg[rs1] = 0x%"PRIx32", _offset = %"PRIu32", offset = %"PRIi32", next_address & reg[rd] = 0x%"PRIx32", pc = 0x%"PRIx32"\n", 
-                rd, rs1, cpu.regs[rs1], _offset, offset, next_address, cpu.pc);
+                printf("OP: JALR (RET): rd = %s, rs1 = %s, reg[rs1] = 0x%"PRIx32", _offset = %"PRIu32", offset = %"PRIi32", next_address & reg[rd] = 0x%"PRIx32", pc = 0x%"PRIx32"\n", 
+                r2s(rd), r2s(rs1), cpu.regs[rs1], _offset, offset, next_address, cpu.pc);
 
-                continue; // !!!!!!!!!!!!!!!
+                continue; // !!!!!!!!!!!!!!! (so pc will be +4'd)
               }
 
 
