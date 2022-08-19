@@ -1,1 +1,1 @@
-clear && clang -std=c99 -g main.c -o main && ./build-test.sh && ./main
+clear && clang -fpic -std=c99 -g main.c -o main && ./build-test.sh && read && ./main test.bin
